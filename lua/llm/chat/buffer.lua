@@ -19,7 +19,7 @@ function M:get_bufnr()
 end
 
 function M:get_user_input()
-  local current_cursor_line, _ = table.unpack(vim.api.nvim_win_get_cursor(0))
+  local current_cursor_line = vim.api.nvim_win_get_cursor(0)[1]
   local all_buffer_lines = vim.api.nvim_buf_get_lines(self.bufnr, 0, -1, false)
 
   local you_marker_line_num = -1

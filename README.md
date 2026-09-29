@@ -123,12 +123,37 @@ The plugin includes a feature to automatically check for updates to the `llm` co
 
 This helps ensure your `llm` tool stays up-to-date with the latest features and fixes.
 
+### Stored Prompts
+
+Define reusable prompts with `prompts` and run them by name with `:LLM <name>`. A prompt can be a string or a table with a `prompt` field. Indentation in `[[...]]` strings is stripped.
+
+```lua
+require('llm').setup({
+  prompts = {
+    review = [[
+      Review this code for correctness, bugs, security,
+      and maintainability. Be concise.
+    ]],
+    tests = { prompt = "Write comprehensive tests for this code." },
+  },
+})
+```
+
+- `:LLM review` - Send the stored `review` prompt
+- `:LLM review focus on error handling` - Send the stored prompt followed by the extra instructions
+- `:LLM re<Tab>` - Complete stored prompt names
+
+Only the first word is matched, so ordinary prompts like `:LLM Explain why this is slow` are unaffected. Built-in subcommands (`file`, `selection`, `explain`, `fragments`, `update`, `embed`) take precedence over prompts with the same name.
+
+Large prompt collections can live in their own Lua module: `prompts = require('my-prompts')`.
+
 ## Usage Examples
 
 ### Commands
 
 #### Unified LLM Command
 - `:LLM {prompt}` - Send prompt to LLM
+- `:LLM {name} [{instructions}]` - Send a [stored prompt](#stored-prompts), optionally with extra instructions
 - `:LLM file [{prompt}]` - Send current file's content with optional prompt  
 - `:LLM selection [{prompt}]` - Send visual selection with optional prompt
 - `:LLM explain` - Explain current buffer's code

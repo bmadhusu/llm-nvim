@@ -2,6 +2,8 @@ local spy = require('luassert.spy')
 
 describe('plugin/llm.lua', function()
   local command_handler_func
+  local command_complete_func
+  local configured_prompts
   local chat_mock
   local llm_mock
   local commands_mock
@@ -20,17 +22,25 @@ describe('plugin/llm.lua', function()
     _G.vim.split = spy.new(function(str, _)
         if str == '' then return {} end
         local result = {}
-        -- Simple space-based split for testing
-        for s in str:gmatch("%S+") do
-          table.insert(result, s)
+        -- Whitespace split that keeps empty fields, like vim.split(str, "%s+")
+        local start = 1
+        while true do
+          local s, e = str:find("%s+", start)
+          if not s then break end
+          table.insert(result, str:sub(start, s - 1))
+          start = e + 1
         end
+        table.insert(result, str:sub(start))
         return result
     end)
 
     command_handler_func = nil
-    _G.vim.api.nvim_create_user_command = spy.new(function(name, handler, _)
+    command_complete_func = nil
+    configured_prompts = nil
+    _G.vim.api.nvim_create_user_command = spy.new(function(name, handler, cmd_opts)
       if name == 'LLM' then
         command_handler_func = handler
+        command_complete_func = cmd_opts.complete
       end
     end)
     -- Add mocks for the functions called by chat.start_chat() -> ui.create_split_buffer()
@@ -54,7 +64,11 @@ describe('plugin/llm.lua', function()
       check_llm_installed = spy.new(function() return true end),
       update_llm_cli = spy.new(),
     }
-    config_mock = { get = spy.new() }
+    config_mock = {
+      get = spy.new(function(key)
+        if key == 'prompts' then return configured_prompts end
+      end)
+    }
 
     -- Use package.loaded for robust mocking
     package.loaded['llm'] = llm_mock
@@ -64,6 +78,7 @@ describe('plugin/llm.lua', function()
     package.loaded['llm.managers.templates_manager'] = templates_manager_mock
     package.loaded['llm.core.utils.shell'] = shell_mock
     package.loaded['llm.config'] = config_mock
+    package.loaded['llm.prompts'] = nil
     -- The chat module requires the ui module, so we need a mock for it.
     package.loaded['llm.core.utils.ui'] = { create_split_buffer = spy.new() }
 
@@ -85,6 +100,7 @@ describe('plugin/llm.lua', function()
     package.loaded['llm.managers.templates_manager'] = nil
     package.loaded['llm.core.utils.shell'] = nil
     package.loaded['llm.config'] = nil
+    package.loaded['llm.prompts'] = nil
     package.loaded['llm.core.utils.ui'] = nil
     _G.vim = old_vim
   end)
@@ -102,6 +118,68 @@ describe('plugin/llm.lua', function()
       command_handler_func({ args = 'hello world', range = 0 })
       assert.spy(commands_mock.prompt).was.called_with('hello world')
       assert.spy(chat_mock.start_chat).was.not_called()
+    end)
+  end)
+
+  describe(':LLM stored prompts', function()
+    before_each(function()
+      configured_prompts = {
+        review = "Review this code",
+        refactor = { prompt = "Refactor this code" },
+        explain = "Custom explain",
+      }
+    end)
+
+    it('should expand a stored prompt name', function()
+      command_handler_func({ args = 'review', range = 0 })
+      assert.spy(commands_mock.prompt).was.called_with('Review this code')
+    end)
+
+    it('should append extra instructions to a stored prompt', function()
+      command_handler_func({ args = 'review focus on error handling', range = 0 })
+      assert.spy(commands_mock.prompt).was.called_with('Review this code\n\nfocus on error handling')
+    end)
+
+    it('should pass free-form prompts through unchanged', function()
+      command_handler_func({ args = 'Explain why this function is slow', range = 0 })
+      assert.spy(commands_mock.prompt).was.called_with('Explain why this function is slow')
+    end)
+
+    it('should keep built-in subcommands ahead of stored prompts', function()
+      command_handler_func({ args = 'explain', range = 0 })
+      assert.spy(commands_mock.explain_code).was.called()
+      assert.spy(commands_mock.prompt).was.not_called()
+    end)
+
+    it('should not expand stored prompt names given to subcommands', function()
+      command_handler_func({ args = 'file review', range = 0 })
+      assert.spy(commands_mock.prompt_with_current_file).was.called_with('review', nil, nil)
+    end)
+  end)
+
+  describe(':LLM completion', function()
+    it('should offer subcommands when no prompts are configured', function()
+      assert.are.same(
+        { 'file', 'selection', 'explain', 'fragments', 'update' },
+        command_complete_func('', 'LLM ', 4))
+    end)
+
+    it('should offer stored prompt names matching the typed prefix', function()
+      configured_prompts = { review = "r", refactor = "f", tests = "t" }
+      assert.are.same({ 'refactor', 'review' }, command_complete_func('re', 'LLM re', 6))
+    end)
+
+    it('should list subcommands before stored prompts without duplicates', function()
+      configured_prompts = { explain = "e", tests = "t" }
+      assert.are.same({ 'explain' }, command_complete_func('ex', 'LLM ex', 6))
+      assert.are.same(
+        { 'file', 'selection', 'explain', 'fragments', 'update', 'tests' },
+        command_complete_func('', 'LLM ', 4))
+    end)
+
+    it('should not complete beyond the first argument', function()
+      configured_prompts = { review = "r" }
+      assert.are.same({}, command_complete_func('re', 'LLM review re', 13))
     end)
   end)
 end)

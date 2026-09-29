@@ -177,6 +177,11 @@ M.defaults = {
     type = "string",
     desc = "Continue the conversation with the given ID"
   },
+  prompts = {
+    default = nil,
+    type = "table",
+    desc = "Named prompts for :LLM <name>, as name = 'text' or name = { prompt = 'text' }"
+  },
   -- Add more config options here
 }
 

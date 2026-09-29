@@ -85,6 +85,8 @@ local command_handlers = {
 -- Main LLM command with subcommands
 -- Usage: :LLM [subcommand] [prompt]
 -- Subcommands: file, selection, explain, schema, template, fragments, update
+-- Any other first word matching a stored prompt name (see llm.prompts) expands
+-- to that prompt, with remaining words appended as extra instructions.
 vim.api.nvim_create_user_command("LLM", function(opts)
   if not opts.args or opts.args == "" then
     require('llm.chat').start_chat()
@@ -98,7 +100,9 @@ vim.api.nvim_create_user_command("LLM", function(opts)
   if handler then
     handler(table.concat(args, " ", 2), opts.range > 0)
   else
-    require('llm.commands').prompt(opts.args)
+    -- A leading stored prompt name expands to that prompt; other text is sent as-is
+    local prompt = require('llm.prompts').resolve(opts.args)
+    require('llm.commands').prompt(prompt)
   end
 end, {
   nargs = "*",
@@ -109,13 +113,27 @@ end, {
 
     -- If we're completing the first argument after LLM
     if #args == 2 then
-      return {
+      local candidates = {
         "file",      -- :LLM file
         "selection", -- :LLM selection
         "explain",   -- :LLM explain
         "fragments", -- :LLM fragments
         "update"     -- :LLM update
       }
+      -- Stored prompts from setup({ prompts = ... }); subcommands take precedence
+      for _, name in ipairs(require('llm.prompts').list()) do
+        if not command_handlers[name] then
+          table.insert(candidates, name)
+        end
+      end
+
+      local matches = {}
+      for _, candidate in ipairs(candidates) do
+        if candidate:sub(1, #ArgLead) == ArgLead then
+          table.insert(matches, candidate)
+        end
+      end
+      return matches
     end
 
     return {}
